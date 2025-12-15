@@ -130,6 +130,21 @@ public class OpenshiftHTTP extends HTTP implements ReusableOpenshiftDeployable, 
     }
 
     @Override
+    public String getHost() {
+        return OpenshiftClient.get().getClusterHostname(HTTP_SVC);
+    }
+
+    @Override
+    public int getHttpPort() {
+        return 80;
+    }
+
+    @Override
+    public int getHttpsPort() {
+        return getHttpPort();
+    }
+
+    @Override
     public String httpUrl() {
         return "http://" + OpenshiftClient.get().getClusterHostname(HTTP_SVC) + "/";
     }
