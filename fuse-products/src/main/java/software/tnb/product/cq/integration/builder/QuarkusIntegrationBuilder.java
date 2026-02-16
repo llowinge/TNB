@@ -1,8 +1,8 @@
 package software.tnb.product.cq.integration.builder;
 
-import software.tnb.product.integration.builder.AbstractIntegrationBuilder;
+import software.tnb.product.integration.builder.AbstractGitIntegrationBuilder;
 
-public class QuarkusIntegrationBuilder extends AbstractIntegrationBuilder<QuarkusIntegrationBuilder> {
+public class QuarkusIntegrationBuilder extends AbstractGitIntegrationBuilder<QuarkusIntegrationBuilder> {
     private boolean devMode = false;
 
     public QuarkusIntegrationBuilder(String integrationName) {

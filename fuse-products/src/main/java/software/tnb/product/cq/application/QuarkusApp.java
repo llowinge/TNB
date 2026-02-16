@@ -7,7 +7,10 @@ import software.tnb.common.utils.waiter.Waiter;
 import software.tnb.product.application.App;
 import software.tnb.product.application.Phase;
 import software.tnb.product.cq.configuration.QuarkusConfiguration;
+import software.tnb.product.git.GitRepository;
+import software.tnb.product.integration.builder.AbstractGitIntegrationBuilder;
 import software.tnb.product.integration.builder.AbstractIntegrationBuilder;
+import software.tnb.product.integration.builder.AbstractMavenGitIntegrationBuilder;
 import software.tnb.product.integration.generator.IntegrationGenerator;
 import software.tnb.product.log.stream.LogStream;
 import software.tnb.product.util.maven.BuildRequest;
@@ -21,10 +24,12 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
@@ -32,20 +37,32 @@ public abstract class QuarkusApp extends App {
     private static final Logger LOG = LoggerFactory.getLogger(QuarkusApp.class);
 
     protected BooleanSupplier readinessCheck;
+    protected Path appDirParent;
+    protected Path appDir;
 
     public QuarkusApp(AbstractIntegrationBuilder<?> integrationBuilder) {
         super(integrationBuilder);
 
         this.integrationBuilder = integrationBuilder;
 
-        if (integrationBuilder.isJBang()) {
-            createUsingJBang();
+        if (integrationBuilder instanceof AbstractGitIntegrationBuilder<?>) {
+            AbstractGitIntegrationBuilder gitIntegrationBuilder = (AbstractGitIntegrationBuilder) integrationBuilder;
+            Path gitClonedDirectory = new GitRepository(gitIntegrationBuilder).getPath();
+            Optional<String> subDirOpt = (Optional<String>) gitIntegrationBuilder.getSubDirectory();
+            this.appDirParent = gitClonedDirectory;
+            this.appDir = subDirOpt.map(gitClonedDirectory::resolve).orElse(gitClonedDirectory);
         } else {
-            createWithMaven();
-        }
+            this.appDirParent = TestConfiguration.appLocation();
+            this.appDir = this.appDirParent.resolve(getName());
+            if (integrationBuilder.isJBang()) {
+                createUsingJBang();
+            } else {
+                createWithMaven();
+            }
 
-        customizeProject(integrationBuilder.getDependencies());
-        customizePlugins(integrationBuilder.getPlugins());
+            customizeProject(integrationBuilder.getDependencies());
+            customizePlugins(integrationBuilder.getPlugins());
+        }
 
         buildApp();
     }
@@ -58,7 +75,7 @@ public abstract class QuarkusApp extends App {
         properties.putAll(QuarkusConfiguration.fromSystemProperties());
 
         BuildRequest.Builder requestBuilder = new BuildRequest.Builder()
-            .withBaseDirectory(TestConfiguration.appLocation().resolve(getName()))
+            .withBaseDirectory(appDir)
             .withArgs("clean", "package")
             .withProperties(properties)
             .withLogFile(getLogPath(Phase.BUILD))
@@ -66,6 +83,10 @@ public abstract class QuarkusApp extends App {
         if (QuarkusConfiguration.isQuarkusNative() && !OpenshiftConfiguration.isOpenshift()) {
             // Native build is performed in the OCP deploy, this build is just for fetching dependencies
             requestBuilder.withProfiles("native");
+        }
+
+        if (integrationBuilder instanceof AbstractMavenGitIntegrationBuilder<?>) {
+            requestBuilder.withProperties(((AbstractMavenGitIntegrationBuilder) integrationBuilder).getMavenProperties());
         }
 
         LOG.info("Building {} application project ({})", getName(), QuarkusConfiguration.isQuarkusNative() ? "native" : "JVM");
@@ -113,7 +134,7 @@ public abstract class QuarkusApp extends App {
         properties.putAll(QuarkusConfiguration.fromSystemProperties());
 
         Maven.invoke(new BuildRequest.Builder()
-            .withBaseDirectory(TestConfiguration.appLocation())
+            .withBaseDirectory(appDirParent)
             .withArgs(quarkusMavenPluginCreate)
             .withProperties(properties)
             .withLogFile(getLogPath(Phase.GENERATE))
@@ -121,7 +142,7 @@ public abstract class QuarkusApp extends App {
             .build()
         );
 
-        IntegrationGenerator.createFiles(integrationBuilder, TestConfiguration.appLocation().resolve(getName()));
+        IntegrationGenerator.createFiles(integrationBuilder, appDir);
     }
 
     /**
@@ -131,21 +152,21 @@ public abstract class QuarkusApp extends App {
      */
     private void customizeProject(List<Dependency> dependencies) {
         // Remove the GreetingResource.java file that is not used
-        final File greetingResource = TestConfiguration.appLocation().resolve(getName())
+        final File greetingResource = appDir
             .resolve("src/main/java/" + TestConfiguration.appGroupId().replace(".", "/") + "/GreetingResource.java").toFile();
         if (greetingResource.exists()) {
             greetingResource.delete();
         }
 
         // Delete autogenerated tests
-        final File tests = TestConfiguration.appLocation().resolve(getName()).resolve("src/test").toFile();
+        final File tests = appDir.resolve("src/test").toFile();
         try {
             FileUtils.deleteDirectory(tests);
         } catch (IOException e) {
             LOG.warn("Unable to delete {} directory", tests.getAbsolutePath(), e);
         }
 
-        File pom = TestConfiguration.appLocation().resolve(getName()).resolve("pom.xml").toFile();
+        File pom = appDir.resolve("pom.xml").toFile();
         Model model = Maven.loadPom(pom);
 
         // Append the camel platform bom (quarkus bom already present)
