@@ -11,6 +11,8 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.awscore.client.builder.AwsClientBuilder;
 import software.amazon.awssdk.core.SdkClient;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
+import software.amazon.awssdk.core.retry.RetryMode;
 import software.amazon.awssdk.regions.Region;
 
 public final class AWSClient {
@@ -25,6 +27,16 @@ public final class AWSClient {
             final AwsClientBuilder builder = (AwsClientBuilder) clazz.getMethod("builder").invoke(null);
             builder.credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(account.accessKey(), account.secretKey())));
             builder.region(Region.of(account.region()));
+
+            // Configure ADAPTIVE retry mode for rate limiting protection
+            // ADAPTIVE mode learns from throttling responses and dynamically adjusts request rates
+            // to prevent LimitExceededException errors (e.g., Kinesis rate limits)
+            builder.overrideConfiguration(
+                ClientOverrideConfiguration.builder()
+                    .retryStrategy(RetryMode.ADAPTIVE)
+                    .build()
+            );
+
             if (url != null) {
                 builder.endpointOverride(new URI(url));
             }
